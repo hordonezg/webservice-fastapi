@@ -9,23 +9,20 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # ------------- Configuración DB -------------
-# Puedes usar una variable de entorno DATABASE_URL (Render/Postgres)
-# Ejemplo: postgres://user:pass@host:5432/dbname
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./dev.db")  # fallback local
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./dev.db")  # local fallback
 
-# Ajuste para SQLite (check_same_thread)
+# Normalizar postgres:// -> postgresql+psycopg2:// (para psycopg2-binary con Py 3.12)
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+
+# Ajustes por motor
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./dev.db")
-
-# Normalizar: postgres:// → postgresql+psycopg:// (psycopg v3)
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
-elif DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
-
-
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
+engine = create_engine(
+    DATABASE_URL,
+    connect_args=connect_args,
+    pool_pre_ping=True,  # evita conexiones muertas al dormir el dyno
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
@@ -51,7 +48,6 @@ class UsuarioOut(BaseModel):
     nombre: str
     correo: EmailStr
     fecha_reg: datetime
-
     class Config:
         from_attributes = True
 
@@ -99,7 +95,7 @@ def listar_usuarios():
 def obtener_usuario(id_usuario: int):
     db = SessionLocal()
     try:
-        u = db.query(Usuario).get(id_usuario)
+        u = db.get(Usuario, id_usuario)  # SQLAlchemy 2.x
         if not u:
             raise HTTPException(status_code=404, detail="No encontrado")
         return u
@@ -110,7 +106,7 @@ def obtener_usuario(id_usuario: int):
 def actualizar_usuario(id_usuario: int, data: UsuarioUpdate):
     db = SessionLocal()
     try:
-        u = db.query(Usuario).get(id_usuario)
+        u = db.get(Usuario, id_usuario)
         if not u:
             raise HTTPException(status_code=404, detail="No encontrado")
         if data.nombre is not None:
@@ -132,7 +128,7 @@ def actualizar_usuario(id_usuario: int, data: UsuarioUpdate):
 def eliminar_usuario(id_usuario: int):
     db = SessionLocal()
     try:
-        u = db.query(Usuario).get(id_usuario)
+        u = db.get(Usuario, id_usuario)
         if not u:
             raise HTTPException(status_code=404, detail="No encontrado")
         db.delete(u)
