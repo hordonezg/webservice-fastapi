@@ -9,19 +9,26 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # ------------- Configuración DB -------------
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./dev.db")  # local fallback
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./dev.db")
 
-# Normalizar postgres:// -> postgresql+psycopg2:// (para psycopg2-binary con Py 3.12)
+# Normalizar a psycopg v3 (compatible con Python 3.13)
 if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
-# Ajustes por motor
+# Agregar SSL si la conexión Postgres lo requiere en Render
+if DATABASE_URL.startswith("postgresql+psycopg://") and "sslmode=" not in DATABASE_URL:
+    sep = "&" if "?" in DATABASE_URL else "?"
+    DATABASE_URL = f"{DATABASE_URL}{sep}sslmode=require"
+
+# Ajustes por motor (solo aplica a SQLite)
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
 engine = create_engine(
     DATABASE_URL,
     connect_args=connect_args,
-    pool_pre_ping=True,  # evita conexiones muertas al dormir el dyno
+    pool_pre_ping=True,  # evita conexiones muertas tras idle
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
@@ -112,7 +119,6 @@ def actualizar_usuario(id_usuario: int, data: UsuarioUpdate):
         if data.nombre is not None:
             u.nombre = data.nombre
         if data.correo is not None:
-            # validar colisión de correo
             if db.query(Usuario).filter(Usuario.correo == data.correo, Usuario.id_usuario != id_usuario).first():
                 raise HTTPException(status_code=409, detail="El correo ya está usado por otro usuario")
             u.correo = data.correo
